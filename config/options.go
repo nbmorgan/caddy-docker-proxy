@@ -23,6 +23,31 @@ type Options struct {
 	Secret                 string
 	ControllerNetwork      *net.IPNet
 	IngressNetworks        []string
+	NamePublish            NamePublishOptions
+}
+
+// NamePublishOptions configures optional name publication after Caddy config apply.
+type NamePublishOptions struct {
+	Enabled    bool
+	CaddyHost  string
+	Technitium TechnitiumOptions
+	Avahi      AvahiOptions
+}
+
+// TechnitiumOptions configures Technitium DNS publishing.
+type TechnitiumOptions struct {
+	Enabled bool
+	BaseURL string
+	Token   string
+	Zone    string
+	TTL     int
+}
+
+// AvahiOptions configures Avahi publishing.
+type AvahiOptions struct {
+	Enabled bool
+	// RefreshInterval re-resolves the caddy host and republishes if needed.
+	RefreshInterval time.Duration
 }
 
 // Mode represents how this instance should run

@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,33 @@ func init() {
 
 			fs.Duration("event-throttle-interval", 100*time.Millisecond,
 				"Interval to throttle caddyfile updates triggered by docker events")
+
+			fs.Bool("name-publish-enabled", false,
+				"Enable name publication after config apply")
+
+			fs.String("name-publish-caddy-host", "",
+				"Caddy front-door hostname or IP for name publication")
+
+			fs.Bool("name-publish-technitium-enabled", false,
+				"Enable Technitium DNS publisher")
+
+			fs.String("name-publish-technitium-base-url", "",
+				"Technitium DNS API base URL")
+
+			fs.String("name-publish-technitium-token", "",
+				"Technitium DNS API token")
+
+			fs.String("name-publish-technitium-zone", "",
+				"Technitium DNS zone for published names")
+
+			fs.Int("name-publish-technitium-ttl", 0,
+				"Technitium DNS record TTL in seconds")
+
+			fs.Bool("name-publish-avahi-enabled", false,
+				"Enable Avahi publisher")
+
+			fs.Duration("name-publish-avahi-refresh-interval", 5*time.Minute,
+				"Interval to re-resolve caddy host and refresh Avahi records (0 to disable)")
 
 			return fs
 		}(),
@@ -157,6 +185,15 @@ func createOptions(flags caddycmd.Flags) *config.Options {
 	dockerCertsPathFlag := flags.String("docker-certs-path")
 	dockerAPIsVersionFlag := flags.String("docker-apis-version")
 	ingressNetworksFlag := flags.String("ingress-networks")
+	namePublishEnabledFlag := flags.Bool("name-publish-enabled")
+	namePublishCaddyHostFlag := flags.String("name-publish-caddy-host")
+	namePublishTechnitiumEnabledFlag := flags.Bool("name-publish-technitium-enabled")
+	namePublishTechnitiumBaseURLFlag := flags.String("name-publish-technitium-base-url")
+	namePublishTechnitiumTokenFlag := flags.String("name-publish-technitium-token")
+	namePublishTechnitiumZoneFlag := flags.String("name-publish-technitium-zone")
+	namePublishTechnitiumTTLFlag := flags.Int("name-publish-technitium-ttl")
+	namePublishAvahiEnabledFlag := flags.Bool("name-publish-avahi-enabled")
+	namePublishAvahiRefreshIntervalFlag := flags.Duration("name-publish-avahi-refresh-interval")
 
 	options := &config.Options{}
 
@@ -276,6 +313,70 @@ func createOptions(flags caddycmd.Flags) *config.Options {
 		}
 	} else {
 		options.EventThrottleInterval = eventThrottleIntervalFlag
+	}
+
+	if namePublishEnabledEnv := os.Getenv("CADDY_DOCKER_NAME_PUBLISH_ENABLED"); namePublishEnabledEnv != "" {
+		options.NamePublish.Enabled = isTrue.MatchString(namePublishEnabledEnv)
+	} else {
+		options.NamePublish.Enabled = namePublishEnabledFlag
+	}
+
+	if namePublishCaddyHostEnv := os.Getenv("CADDY_DOCKER_NAME_PUBLISH_CADDY_HOST"); namePublishCaddyHostEnv != "" {
+		options.NamePublish.CaddyHost = namePublishCaddyHostEnv
+	} else {
+		options.NamePublish.CaddyHost = namePublishCaddyHostFlag
+	}
+
+	if technitiumEnabledEnv := os.Getenv("CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_ENABLED"); technitiumEnabledEnv != "" {
+		options.NamePublish.Technitium.Enabled = isTrue.MatchString(technitiumEnabledEnv)
+	} else {
+		options.NamePublish.Technitium.Enabled = namePublishTechnitiumEnabledFlag
+	}
+
+	if technitiumBaseURLEnv := os.Getenv("CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_BASE_URL"); technitiumBaseURLEnv != "" {
+		options.NamePublish.Technitium.BaseURL = technitiumBaseURLEnv
+	} else {
+		options.NamePublish.Technitium.BaseURL = namePublishTechnitiumBaseURLFlag
+	}
+
+	if technitiumTokenEnv := os.Getenv("CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_TOKEN"); technitiumTokenEnv != "" {
+		options.NamePublish.Technitium.Token = technitiumTokenEnv
+	} else {
+		options.NamePublish.Technitium.Token = namePublishTechnitiumTokenFlag
+	}
+
+	if technitiumZoneEnv := os.Getenv("CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_ZONE"); technitiumZoneEnv != "" {
+		options.NamePublish.Technitium.Zone = technitiumZoneEnv
+	} else {
+		options.NamePublish.Technitium.Zone = namePublishTechnitiumZoneFlag
+	}
+
+	if technitiumTTLEnv := os.Getenv("CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_TTL"); technitiumTTLEnv != "" {
+		if ttl, err := strconv.Atoi(technitiumTTLEnv); err != nil {
+			log.Error("Failed to parse CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_TTL", zap.String("CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_TTL", technitiumTTLEnv), zap.Error(err))
+			options.NamePublish.Technitium.TTL = namePublishTechnitiumTTLFlag
+		} else {
+			options.NamePublish.Technitium.TTL = ttl
+		}
+	} else {
+		options.NamePublish.Technitium.TTL = namePublishTechnitiumTTLFlag
+	}
+
+	if avahiEnabledEnv := os.Getenv("CADDY_DOCKER_NAME_PUBLISH_AVAHI_ENABLED"); avahiEnabledEnv != "" {
+		options.NamePublish.Avahi.Enabled = isTrue.MatchString(avahiEnabledEnv)
+	} else {
+		options.NamePublish.Avahi.Enabled = namePublishAvahiEnabledFlag
+	}
+
+	if avahiRefreshEnv := os.Getenv("CADDY_DOCKER_NAME_PUBLISH_AVAHI_REFRESH_INTERVAL"); avahiRefreshEnv != "" {
+		if d, err := time.ParseDuration(avahiRefreshEnv); err != nil {
+			log.Error("Failed to parse CADDY_DOCKER_NAME_PUBLISH_AVAHI_REFRESH_INTERVAL", zap.String("CADDY_DOCKER_NAME_PUBLISH_AVAHI_REFRESH_INTERVAL", avahiRefreshEnv), zap.Error(err))
+			options.NamePublish.Avahi.RefreshInterval = namePublishAvahiRefreshIntervalFlag
+		} else {
+			options.NamePublish.Avahi.RefreshInterval = d
+		}
+	} else {
+		options.NamePublish.Avahi.RefreshInterval = namePublishAvahiRefreshIntervalFlag
 	}
 
 	return options

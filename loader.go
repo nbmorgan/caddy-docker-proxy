@@ -22,6 +22,7 @@ import (
 	"github.com/lucaslorentz/caddy-docker-proxy/v2/config"
 	"github.com/lucaslorentz/caddy-docker-proxy/v2/docker"
 	"github.com/lucaslorentz/caddy-docker-proxy/v2/generator"
+	"github.com/lucaslorentz/caddy-docker-proxy/v2/namepublish"
 	"github.com/lucaslorentz/caddy-docker-proxy/v2/utils"
 
 	"go.uber.org/zap"
@@ -42,6 +43,7 @@ type DockerLoader struct {
 	lastVersion     int64
 	serversVersions *utils.StringInt64CMap
 	serversUpdating *utils.StringBoolCMap
+	namePublishMgr  *namepublish.Manager
 }
 
 // CreateDockerLoader creates a docker loader
@@ -144,6 +146,13 @@ func (dockerLoader *DockerLoader) Start() error {
 		docker.CreateUtils(),
 		dockerLoader.options,
 	)
+
+	publishers, err := namepublish.BuildPublishers(dockerLoader.options.NamePublish, log.Named("namepublish"))
+	if err != nil {
+		log.Error("Failed to configure name publishers", zap.Error(err))
+		return err
+	}
+	dockerLoader.namePublishMgr = namepublish.NewManager(dockerLoader.options.NamePublish.CaddyHost, publishers, log.Named("namepublish"))
 
 	log.Info(
 		"Start",
@@ -254,12 +263,12 @@ func (dockerLoader *DockerLoader) update() bool {
 	if caddyfileChanged {
 		log.Info("New Caddyfile", zap.ByteString("caddyfile", caddyfile))
 
-        tmpPath := CaddyfileAutosavePath + ".tmp"
-        if err := os.WriteFile(tmpPath, caddyfile, 0640); err != nil {
-            log.Warn("Failed to write temporary caddyfile", zap.Error(err), zap.String("path", tmpPath))
-        } else if err := os.Rename(tmpPath, CaddyfileAutosavePath); err != nil {
-            log.Warn("Failed to autosave caddyfile", zap.Error(err), zap.String("path", CaddyfileAutosavePath))
-        }
+		tmpPath := CaddyfileAutosavePath + ".tmp"
+		if err := os.WriteFile(tmpPath, caddyfile, 0640); err != nil {
+			log.Warn("Failed to write temporary caddyfile", zap.Error(err), zap.String("path", tmpPath))
+		} else if err := os.Rename(tmpPath, CaddyfileAutosavePath); err != nil {
+			log.Warn("Failed to autosave caddyfile", zap.Error(err), zap.String("path", CaddyfileAutosavePath))
+		}
 
 		adapter := caddyconfig.GetAdapter("caddyfile")
 
@@ -345,6 +354,8 @@ func (dockerLoader *DockerLoader) updateServer(wg *sync.WaitGroup, server string
 	}
 
 	dockerLoader.serversVersions.Set(server, version)
+
+	dockerLoader.namePublishMgr.MaybePublish(version, dockerLoader.lastCaddyfile)
 
 	log.Info("Successfully configured", zap.String("server", server))
 }

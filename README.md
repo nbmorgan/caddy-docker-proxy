@@ -520,6 +520,24 @@ Usage of docker-proxy:
         Interval Caddy should manually check Docker for a new Caddyfile (default 30s)
   --event-throttle-interval duration
         Interval to throttle caddyfile updates triggered by docker events (default 100ms)
+  --name-publish-enabled
+        Enable name publication after config apply
+  --name-publish-caddy-host string
+        Caddy front-door hostname or IP for name publication
+  --name-publish-technitium-enabled
+        Enable Technitium DNS publisher
+  --name-publish-technitium-base-url string
+        Technitium DNS API base URL
+  --name-publish-technitium-token string
+        Technitium DNS API token
+  --name-publish-technitium-zone string
+        Technitium DNS zone for published names
+  --name-publish-technitium-ttl int
+        Technitium DNS record TTL in seconds
+  --name-publish-avahi-enabled
+        Enable Avahi publisher
+  --name-publish-avahi-refresh-interval duration
+        Interval to re-resolve caddy host and refresh Avahi records (0 to disable) (default 5m0s)
   --process-caddyfile
         Process Caddyfile before loading it, removing invalid servers (default true)
   --proxy-service-tasks
@@ -545,7 +563,20 @@ CADDY_DOCKER_PROCESS_CADDYFILE=<bool>
 CADDY_DOCKER_PROXY_SERVICE_TASKS=<bool>
 CADDY_DOCKER_SCAN_STOPPED_CONTAINERS=<bool>
 CADDY_DOCKER_NO_SCOPE=<bool, default scope used>
+CADDY_DOCKER_NAME_PUBLISH_ENABLED=<bool>
+CADDY_DOCKER_NAME_PUBLISH_CADDY_HOST=<string>
+CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_ENABLED=<bool>
+CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_BASE_URL=<string>
+CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_TOKEN=<string>
+CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_ZONE=<string>
+CADDY_DOCKER_NAME_PUBLISH_TECHNITIUM_TTL=<int>
+CADDY_DOCKER_NAME_PUBLISH_AVAHI_ENABLED=<bool>
+CADDY_DOCKER_NAME_PUBLISH_AVAHI_REFRESH_INTERVAL=<duration>
 ```
+
+## Name publication (optional)
+
+When enabled, the controller publishes the site names from the generated Caddyfile to external name systems after a successful config apply. This is best-effort and never affects routing. The `CADDY_DOCKER_NAME_PUBLISH_CADDY_HOST` value is treated as the front-door target and may be a hostname or IP. The Avahi publisher uses D-Bus to publish `.local` names and can periodically re-resolve the caddy host to refresh records.
 
 Check **examples** folder to see how to set them on a Docker Compose file.
 
