@@ -537,7 +537,7 @@ Usage of docker-proxy:
   --name-publish-avahi-enabled
         Enable Avahi publisher
   --name-publish-avahi-refresh-interval duration
-        Interval to re-resolve caddy host and refresh Avahi records (0 to disable) (default 5m0s)
+        Interval to re-resolve caddy host and refresh mDNS records (0 to disable) (default 5m0s)
   --process-caddyfile
         Process Caddyfile before loading it, removing invalid servers (default true)
   --proxy-service-tasks
@@ -576,7 +576,7 @@ CADDY_DOCKER_NAME_PUBLISH_AVAHI_REFRESH_INTERVAL=<duration>
 
 ## Name publication (optional)
 
-When enabled, the controller publishes the site names from the generated Caddyfile to external name systems after a successful config apply. This is best-effort and never affects routing. The `CADDY_DOCKER_NAME_PUBLISH_CADDY_HOST` value is treated as the front-door target and may be a hostname or IP. The Avahi publisher uses D-Bus to publish `.local` names and can periodically re-resolve the caddy host to refresh records.
+When enabled, the controller publishes the site names from the generated Caddyfile to external name systems after a successful config apply. This is best-effort and never affects routing. The `CADDY_DOCKER_NAME_PUBLISH_CADDY_HOST` value is treated as the front-door target and may be a hostname or IP. The Avahi publisher runs an embedded mDNS responder for `.local` names and can periodically re-resolve the caddy host to refresh records.
 
 Check **examples** folder to see how to set them on a Docker Compose file.
 

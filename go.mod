@@ -5,6 +5,7 @@ go 1.25
 require (
 	github.com/caddyserver/caddy/v2 v2.10.2
 	github.com/docker/docker v28.5.2+incompatible
+	github.com/hashicorp/mdns v1.0.6
 	github.com/joho/godotenv v1.5.1
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.1

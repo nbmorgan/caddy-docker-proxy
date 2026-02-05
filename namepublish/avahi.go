@@ -9,28 +9,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godbus/dbus/v5"
+	"github.com/hashicorp/mdns"
 	"github.com/lucaslorentz/caddy-docker-proxy/v2/config"
-	"github.com/mistygrip/go-avahi"
+	"github.com/miekg/dns"
 	"go.uber.org/zap"
 )
 
-// AvahiPublisher publishes .local names via Avahi.
+// AvahiPublisher publishes .local names via mDNS.
 type AvahiPublisher struct {
 	logger          *zap.Logger
 	refreshInterval time.Duration
 	resolver        *net.Resolver
 
-	mu           sync.Mutex
+	mu           sync.RWMutex
 	desiredNames []string
 	desiredHost  string
 	lastHash     string
 	lastIPs      []string
 
-	conn   *dbus.Conn
-	server *avahi.Server
-	group  *avahi.EntryGroup
-
+	server *mdns.Server
 	ticker *time.Ticker
 	stopCh chan struct{}
 }
@@ -47,17 +44,21 @@ func NewAvahiPublisher(opts config.AvahiOptions, logger *zap.Logger) (*AvahiPubl
 	}, nil
 }
 
-// Publish publishes .local names via Avahi.
-// TODO: Implement Avahi integration.
+// Publish publishes .local names via mDNS.
 func (p *AvahiPublisher) Publish(ctx context.Context, names []string, caddyHost string) error {
 	if p == nil {
 		return nil
 	}
+
 	p.mu.Lock()
 	p.desiredNames = append([]string{}, names...)
 	p.desiredHost = caddyHost
 	p.startTickerLocked()
 	p.mu.Unlock()
+
+	if err := p.ensureServer(); err != nil {
+		return err
+	}
 
 	return p.reconcile(ctx)
 }
@@ -85,14 +86,15 @@ func (p *AvahiPublisher) tick() {
 }
 
 func (p *AvahiPublisher) reconcile(ctx context.Context) error {
-	p.mu.Lock()
+	p.mu.RLock()
 	names := append([]string{}, p.desiredNames...)
 	caddyHost := p.desiredHost
-	p.mu.Unlock()
+	p.mu.RUnlock()
 
 	localNames := filterLocalNames(names)
 	if len(localNames) == 0 {
-		return p.resetGroup()
+		p.updateState(nil, nil)
+		return nil
 	}
 
 	ips, err := p.resolveIPs(ctx, caddyHost)
@@ -104,13 +106,8 @@ func (p *AvahiPublisher) reconcile(ctx context.Context) error {
 	}
 
 	hash := hashAvahiState(localNames, ips)
-	needsPublish, err := p.ensureConnection(ctx)
-	if err != nil {
-		return err
-	}
-
 	p.mu.Lock()
-	if !needsPublish && hash == p.lastHash && sameStringSlice(ips, p.lastIPs) {
+	if hash == p.lastHash && sameStringSlice(ips, p.lastIPs) {
 		p.mu.Unlock()
 		return nil
 	}
@@ -118,21 +115,8 @@ func (p *AvahiPublisher) reconcile(ctx context.Context) error {
 	p.lastIPs = append([]string{}, ips...)
 	p.mu.Unlock()
 
-	if err := p.group.Reset(); err != nil {
-		return err
-	}
-	for _, name := range localNames {
-		for _, ip := range ips {
-			if err := p.group.AddAddress(avahi.InterfaceUnspec, avahi.ProtoUnspec, 0, name, ip); err != nil {
-				return err
-			}
-		}
-	}
-	if err := p.group.Commit(); err != nil {
-		return err
-	}
-
-	p.logger.Info("Avahi publish refreshed", zap.Int("local_names", len(localNames)), zap.Int("ips", len(ips)))
+	p.updateState(localNames, ips)
+	p.logger.Info("mDNS publish refreshed", zap.Int("local_names", len(localNames)), zap.Int("ips", len(ips)))
 	return nil
 }
 
@@ -173,68 +157,16 @@ func (p *AvahiPublisher) resolveIPs(ctx context.Context, host string) ([]string,
 	return ips, nil
 }
 
-func (p *AvahiPublisher) ensureConnection(_ context.Context) (bool, error) {
+func (p *AvahiPublisher) ensureServer() error {
 	if p.server != nil {
-		if _, err := p.server.GetState(); err == nil {
-			if p.group != nil {
-				return false, nil
-			}
-			group, err := p.newEntryGroup()
-			if err != nil {
-				return true, err
-			}
-			p.group = group
-			return true, nil
-		}
-	}
-
-	p.closeConnection()
-
-	conn, err := dbus.SystemBus()
-	if err != nil {
-		return true, err
-	}
-	server, err := avahi.ServerNew(conn)
-	if err != nil {
-		conn.Close()
-		return true, err
-	}
-	group, err := newEntryGroup(server, conn)
-	if err != nil {
-		server.Close()
-		conn.Close()
-		return true, err
-	}
-	p.conn = conn
-	p.server = server
-	p.group = group
-	return true, nil
-}
-
-func (p *AvahiPublisher) newEntryGroup() (*avahi.EntryGroup, error) {
-	if p.server == nil {
-		return nil, fmt.Errorf("avahi server not initialized")
-	}
-	return p.server.EntryGroupNew()
-}
-
-func (p *AvahiPublisher) resetGroup() error {
-	if p.group == nil {
 		return nil
 	}
-	return p.group.Reset()
-}
-
-func (p *AvahiPublisher) closeConnection() {
-	p.group = nil
-	if p.server != nil {
-		p.server.Close()
-		p.server = nil
+	server, err := mdns.NewServer(&mdns.Config{Zone: p})
+	if err != nil {
+		return fmt.Errorf("failed to start mdns server: %w", err)
 	}
-	if p.conn != nil {
-		_ = p.conn.Close()
-		p.conn = nil
-	}
+	p.server = server
+	return nil
 }
 
 func filterLocalNames(names []string) []string {
@@ -263,4 +195,77 @@ func sameStringSlice(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (p *AvahiPublisher) updateState(names []string, ips []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.desiredNames = append([]string{}, names...)
+	p.lastIPs = append([]string{}, ips...)
+}
+
+// Records implements mdns.Zone.
+func (p *AvahiPublisher) Records(q dns.Question) []dns.RR {
+	if q.Qtype != dns.TypeA && q.Qtype != dns.TypeAAAA {
+		return nil
+	}
+
+	name := strings.TrimSuffix(strings.ToLower(q.Name), ".")
+	if !nameHasLocalSuffix(name) {
+		return nil
+	}
+
+	p.mu.RLock()
+	names := append([]string{}, p.desiredNames...)
+	ips := append([]string{}, p.lastIPs...)
+	p.mu.RUnlock()
+
+	if !containsName(names, name) {
+		return nil
+	}
+
+	var records []dns.RR
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		switch q.Qtype {
+		case dns.TypeA:
+			if ip.To4() == nil {
+				continue
+			}
+			records = append(records, &dns.A{
+				Hdr: dns.RR_Header{Name: dns.Fqdn(name), Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 120},
+				A:   ip.To4(),
+			})
+		case dns.TypeAAAA:
+			if ip.To4() != nil {
+				continue
+			}
+			records = append(records, &dns.AAAA{
+				Hdr:  dns.RR_Header{Name: dns.Fqdn(name), Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 120},
+				AAAA: ip,
+			})
+		}
+	}
+	return records
+}
+
+// NSEC implements mdns.Zone.
+func (p *AvahiPublisher) NSEC(_ dns.Question) []dns.RR {
+	return nil
+}
+
+func containsName(names []string, candidate string) bool {
+	for _, name := range names {
+		if strings.EqualFold(name, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func nameHasLocalSuffix(name string) bool {
+	return strings.HasSuffix(strings.ToLower(name), ".local")
 }

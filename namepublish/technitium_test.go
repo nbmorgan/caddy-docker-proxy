@@ -2,6 +2,7 @@ package namepublish
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -32,14 +33,28 @@ func TestTechnitiumRecordParams(t *testing.T) {
 	require.Equal(t, "caddy.example.com", value)
 }
 
-func TestTechnitiumPublishRequests(t *testing.T) {
-	var gotValues map[string][]string
+func TestTechnitiumPublishAddsManagedComment(t *testing.T) {
+	var addValues map[string][]string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "POST", r.Method)
-		require.NoError(t, r.ParseForm())
-		gotValues = r.PostForm
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		if r.URL.Path == "/api/zones/records/get" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status": "ok",
+				"response": map[string]interface{}{
+					"records": []interface{}{},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/api/zones/records/add" {
+			require.Equal(t, "POST", r.Method)
+			require.NoError(t, r.ParseForm())
+			addValues = r.PostForm
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
 
@@ -54,11 +69,12 @@ func TestTechnitiumPublishRequests(t *testing.T) {
 	err = publisher.Publish(context.Background(), []string{"app.example.com"}, "caddy.example.com")
 	require.NoError(t, err)
 
-	require.Equal(t, []string{"token"}, gotValues["token"])
-	require.Equal(t, []string{"example.com"}, gotValues["zone"])
-	require.Equal(t, []string{"app.example.com"}, gotValues["domain"])
-	require.Equal(t, []string{"CNAME"}, gotValues["type"])
-	require.Equal(t, []string{"caddy.example.com"}, gotValues["cname"])
-	require.Equal(t, []string{"true"}, gotValues["overwrite"])
-	require.Equal(t, []string{"60"}, gotValues["ttl"])
+	require.Equal(t, []string{"token"}, addValues["token"])
+	require.Equal(t, []string{"example.com"}, addValues["zone"])
+	require.Equal(t, []string{"app.example.com"}, addValues["domain"])
+	require.Equal(t, []string{"CNAME"}, addValues["type"])
+	require.Equal(t, []string{"caddy.example.com"}, addValues["cname"])
+	require.Equal(t, []string{"true"}, addValues["overwrite"])
+	require.Equal(t, []string{"60"}, addValues["ttl"])
+	require.Equal(t, []string{technitiumManagedComment}, addValues["comments"])
 }
