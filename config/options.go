@@ -16,6 +16,10 @@ type Options struct {
 	ControlledServersLabel string
 	ProxyServiceTasks      bool
 	ProcessCaddyfile       bool
+	MergeSites             bool
+	PrettyLogJSON          bool
+	LogFormat              string
+	DefaultImport          string
 	ScanStoppedContainers  bool
 	PollingInterval        time.Duration
 	EventThrottleInterval  time.Duration

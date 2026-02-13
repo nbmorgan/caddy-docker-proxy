@@ -540,6 +540,14 @@ Usage of docker-proxy:
         Interval to re-resolve caddy host and refresh mDNS records (0 to disable) (default 5m0s)
   --process-caddyfile
         Process Caddyfile before loading it, removing invalid servers (default true)
+  --merge-sites
+        Merge overlapping site blocks instead of treating them as ambiguous (default false)
+  --pretty-log-json
+        Pretty-print JSON logged for config updates (default false)
+  --log-format string
+        Log format for controller logs: json | console (default "json")
+  --default-import string
+        Snippet name to import into every label-generated site
   --proxy-service-tasks
         Proxy to service tasks instead of service load balancer (default true)
   --scan-stopped-containers
@@ -560,6 +568,10 @@ CADDY_DOCKER_LABEL_PREFIX=<string>
 CADDY_DOCKER_MODE=<string>
 CADDY_DOCKER_POLLING_INTERVAL=<duration>
 CADDY_DOCKER_PROCESS_CADDYFILE=<bool>
+CADDY_DOCKER_MERGE_SITES=<bool>
+CADDY_DOCKER_PRETTY_LOG_JSON=<bool>
+CADDY_DOCKER_LOG_FORMAT=<string>
+CADDY_DOCKER_DEFAULT_IMPORT=<string>
 CADDY_DOCKER_PROXY_SERVICE_TASKS=<bool>
 CADDY_DOCKER_SCAN_STOPPED_CONTAINERS=<bool>
 CADDY_DOCKER_NO_SCOPE=<bool, default scope used>
@@ -574,9 +586,15 @@ CADDY_DOCKER_NAME_PUBLISH_AVAHI_ENABLED=<bool>
 CADDY_DOCKER_NAME_PUBLISH_AVAHI_REFRESH_INTERVAL=<duration>
 ```
 
+## Overlapping site blocks (optional)
+
+By default, if a Docker label defines a site address that already exists in the base Caddyfile, Caddy considers this an ambiguous site definition and the generated block is removed. Set `CADDY_DOCKER_MERGE_SITES=true` (or `--merge-sites`) to merge overlapping site blocks instead, in which case a warning is logged to make the merge explicit.
+
 ## Name publication (optional)
 
 When enabled, the controller publishes the site names from the generated Caddyfile to external name systems after a successful config apply. This is best-effort and never affects routing. The `CADDY_DOCKER_NAME_PUBLISH_CADDY_HOST` value is treated as the front-door target and may be a hostname or IP. The Avahi publisher runs an embedded mDNS responder for `.local` names and can periodically re-resolve the caddy host to refresh records.
+
+Technitium only publishes names within the configured zone; out-of-zone names (such as `.local`) are ignored.
 
 Check **examples** folder to see how to set them on a Docker Compose file.
 

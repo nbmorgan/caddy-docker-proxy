@@ -78,3 +78,43 @@ func TestTechnitiumPublishAddsManagedComment(t *testing.T) {
 	require.Equal(t, []string{"60"}, addValues["ttl"])
 	require.Equal(t, []string{technitiumManagedComment}, addValues["comments"])
 }
+
+func TestTechnitiumPublishSkipsOutOfZoneNames(t *testing.T) {
+	addCount := 0
+	var domains []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/zones/records/get" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status": "ok",
+				"response": map[string]interface{}{
+					"records": []interface{}{},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/api/zones/records/add" {
+			require.Equal(t, "POST", r.Method)
+			require.NoError(t, r.ParseForm())
+			addCount++
+			domains = append(domains, r.PostForm.Get("domain"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	publisher, err := NewTechnitiumPublisher(config.TechnitiumOptions{
+		BaseURL: server.URL,
+		Token:   "token",
+		Zone:    "example.com",
+	}, zap.NewNop())
+	require.NoError(t, err)
+
+	err = publisher.Publish(context.Background(), []string{"app.example.com", "portainer.local", "other.example.net"}, "caddy.example.com")
+	require.NoError(t, err)
+	require.Equal(t, 1, addCount)
+	require.Equal(t, []string{"app.example.com"}, domains)
+}

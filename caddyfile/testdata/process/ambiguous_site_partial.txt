@@ -1,0 +1,14 @@
+example.com {
+	respond "one"
+}
+example.com example.net {
+	respond "two"
+}
+----------
+example.com {
+	respond "one"
+}
+example.net {
+	respond "two"
+}
+----------

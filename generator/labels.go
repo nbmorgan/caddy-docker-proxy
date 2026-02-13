@@ -1,17 +1,17 @@
 package generator
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"text/template"
-	"sort"
 
 	"github.com/lucaslorentz/caddy-docker-proxy/v2/caddyfile"
 )
 
 type targetsProvider func() ([]string, error)
 
-func labelsToCaddyfile(labels map[string]string, templateData interface{}, getTargets targetsProvider) (*caddyfile.Container, error) {
+func labelsToCaddyfile(labels map[string]string, templateData interface{}, defaultImport string, getTargets targetsProvider) (*caddyfile.Container, error) {
 	funcMap := template.FuncMap{
 		"upstreams": func(options ...interface{}) (string, error) {
 			targets, err := getTargets()
@@ -41,5 +41,37 @@ func labelsToCaddyfile(labels map[string]string, templateData interface{}, getTa
 		},
 	}
 
-	return caddyfile.FromLabels(labels, templateData, funcMap)
+	container, err := caddyfile.FromLabels(labels, templateData, funcMap)
+	if err != nil || container == nil {
+		return container, err
+	}
+
+	if strings.TrimSpace(defaultImport) != "" {
+		applyDefaultImport(container, strings.TrimSpace(defaultImport))
+	}
+
+	return container, nil
+}
+
+func applyDefaultImport(container *caddyfile.Container, defaultImport string) {
+	for _, block := range container.Children {
+		if block.IsGlobalBlock() || block.IsSnippet() || block.IsMatcher() {
+			continue
+		}
+		if hasDirective(block, "import") || hasDirective(block, "tls") {
+			continue
+		}
+		importBlock := caddyfile.CreateBlock()
+		importBlock.AddKeys("import", defaultImport)
+		block.AddBlock(importBlock)
+	}
+}
+
+func hasDirective(block *caddyfile.Block, name string) bool {
+	for _, child := range block.Container.Children {
+		if child.GetFirstKey() == name {
+			return true
+		}
+	}
+	return false
 }

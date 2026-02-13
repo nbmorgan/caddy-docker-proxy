@@ -9,7 +9,7 @@ import (
 func (g *CaddyfileGenerator) getContainerCaddyfile(container *types.Container, logger *zap.Logger) (*caddyfile.Container, error) {
 	caddyLabels := g.filterLabels(container.Labels)
 
-	return labelsToCaddyfile(caddyLabels, container, func() ([]string, error) {
+	return labelsToCaddyfile(caddyLabels, container, g.options.DefaultImport, func() ([]string, error) {
 		return g.getContainerIPAddresses(container, logger, true)
 	})
 }

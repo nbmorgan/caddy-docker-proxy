@@ -15,7 +15,7 @@ import (
 func (g *CaddyfileGenerator) getServiceCaddyfile(service *swarm.Service, logger *zap.Logger) (*caddyfile.Container, error) {
 	caddyLabels := g.filterLabels(service.Spec.Labels)
 
-	return labelsToCaddyfile(caddyLabels, service, func() ([]string, error) {
+	return labelsToCaddyfile(caddyLabels, service, g.options.DefaultImport, func() ([]string, error) {
 		return g.getServiceProxyTargets(service, logger, true)
 	})
 }

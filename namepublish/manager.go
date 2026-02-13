@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const publishTimeout = 10 * time.Second
+const publishTimeout = 3*time.Minute + 15*time.Second
 
 // Manager coordinates name publication after config apply.
 type Manager struct {
@@ -66,6 +66,12 @@ func (m *Manager) MaybePublish(version int64, caddyfileBytes []byte) {
 	m.lastHash = hash
 	m.mu.Unlock()
 
+	m.logger.Info(
+		"Publishing names",
+		zap.Int("count", len(names)),
+		zap.Strings("names", names),
+	)
+
 	go m.publish(names)
 }
 
@@ -77,8 +83,20 @@ func (m *Manager) publish(names []string) {
 		if entry.Publisher == nil {
 			continue
 		}
+		start := time.Now()
 		if err := entry.Publisher.Publish(ctx, names, m.caddyHost); err != nil {
-			m.logger.Warn("Name publisher failed", zap.String("publisher", entry.Name), zap.Error(err))
+			m.logger.Warn(
+				"Name publisher failed",
+				zap.String("publisher", entry.Name),
+				zap.Duration("elapsed", time.Since(start)),
+				zap.Error(err),
+			)
+		} else {
+			m.logger.Info(
+				"Name publisher succeeded",
+				zap.String("publisher", entry.Name),
+				zap.Duration("elapsed", time.Since(start)),
+			)
 		}
 	}
 }

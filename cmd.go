@@ -62,6 +62,18 @@ func init() {
 			fs.Bool("process-caddyfile", true,
 				"Process Caddyfile before loading it, removing invalid servers")
 
+			fs.Bool("merge-sites", false,
+				"Merge overlapping site blocks instead of treating them as ambiguous")
+
+			fs.Bool("pretty-log-json", false,
+				"Pretty-print JSON logged for config updates")
+
+			fs.String("log-format", "json",
+				"Log format for controller logs: json | console")
+
+			fs.String("default-import", "",
+				"Snippet name to import into every label-generated site")
+
 			fs.Bool("scan-stopped-containers", false,
 				"Scan stopped containers and use its labels for caddyfile generation")
 
@@ -176,6 +188,10 @@ func createOptions(flags caddycmd.Flags) *config.Options {
 	labelPrefixFlag := flags.String("label-prefix")
 	proxyServiceTasksFlag := flags.Bool("proxy-service-tasks")
 	processCaddyfileFlag := flags.Bool("process-caddyfile")
+	mergeSitesFlag := flags.Bool("merge-sites")
+	prettyLogJSONFlag := flags.Bool("pretty-log-json")
+	logFormatFlag := flags.String("log-format")
+	defaultImportFlag := flags.String("default-import")
 	scanStoppedContainersFlag := flags.Bool("scan-stopped-containers")
 	pollingIntervalFlag := flags.Duration("polling-interval")
 	eventThrottleIntervalFlag := flags.Duration("event-throttle-interval")
@@ -286,6 +302,32 @@ func createOptions(flags caddycmd.Flags) *config.Options {
 	} else {
 		options.ProcessCaddyfile = processCaddyfileFlag
 	}
+
+	if mergeSitesEnv := os.Getenv("CADDY_DOCKER_MERGE_SITES"); mergeSitesEnv != "" {
+		options.MergeSites = isTrue.MatchString(mergeSitesEnv)
+	} else {
+		options.MergeSites = mergeSitesFlag
+	}
+
+	if prettyLogJSONEnv := os.Getenv("CADDY_DOCKER_PRETTY_LOG_JSON"); prettyLogJSONEnv != "" {
+		options.PrettyLogJSON = isTrue.MatchString(prettyLogJSONEnv)
+	} else {
+		options.PrettyLogJSON = prettyLogJSONFlag
+	}
+
+	if logFormatEnv := os.Getenv("CADDY_DOCKER_LOG_FORMAT"); logFormatEnv != "" {
+		options.LogFormat = logFormatEnv
+	} else {
+		options.LogFormat = logFormatFlag
+	}
+
+	if defaultImportEnv := os.Getenv("CADDY_DOCKER_DEFAULT_IMPORT"); defaultImportEnv != "" {
+		options.DefaultImport = defaultImportEnv
+	} else {
+		options.DefaultImport = defaultImportFlag
+	}
+
+	setLogger(buildLogger(options.LogFormat))
 
 	if scanStoppedContainersEnv := os.Getenv("CADDY_DOCKER_SCAN_STOPPED_CONTAINERS"); scanStoppedContainersEnv != "" {
 		options.ScanStoppedContainers = isTrue.MatchString(scanStoppedContainersEnv)

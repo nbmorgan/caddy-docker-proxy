@@ -105,7 +105,7 @@ func (g *CaddyfileGenerator) GenerateCaddyfile(logger *zap.Logger) ([]byte, []st
 							if err != nil {
 								logger.Error("Failed to parse Swarm Config caddyfile format", zap.String("config", config.Spec.Name), zap.Error(err))
 							} else {
-								caddyfileBlock.Merge(block)
+								g.mergeCaddyfile(caddyfileBlock, block, logger)
 							}
 						}
 					}
@@ -135,7 +135,7 @@ func (g *CaddyfileGenerator) GenerateCaddyfile(logger *zap.Logger) ([]byte, []st
 				}
 				containerCaddyfile, err := g.getContainerCaddyfile(&container, logger)
 				if err == nil {
-					caddyfileBlock.Merge(containerCaddyfile)
+					g.mergeCaddyfile(caddyfileBlock, containerCaddyfile, logger)
 				} else {
 					logger.Error("Failed to get Container Caddyfile", zap.String("container", container.ID), zap.Error(err))
 				}
@@ -167,7 +167,7 @@ func (g *CaddyfileGenerator) GenerateCaddyfile(logger *zap.Logger) ([]byte, []st
 					// caddy. labels based config
 					serviceCaddyfile, err := g.getServiceCaddyfile(&service, logger)
 					if err == nil {
-						caddyfileBlock.Merge(serviceCaddyfile)
+						g.mergeCaddyfile(caddyfileBlock, serviceCaddyfile, logger)
 					} else {
 						logger.Error("Failed to get Swarm service caddyfile", zap.String("service", service.Spec.Name), zap.Error(err))
 					}
@@ -212,6 +212,101 @@ func (g *CaddyfileGenerator) GenerateCaddyfile(logger *zap.Logger) ([]byte, []st
 	}
 
 	return caddyfileContent, controlledServers
+}
+
+func (g *CaddyfileGenerator) mergeCaddyfile(base, incoming *caddyfile.Container, logger *zap.Logger) {
+	if base == nil || incoming == nil {
+		return
+	}
+	if !g.options.MergeSites {
+		base.Merge(incoming)
+		return
+	}
+
+	for _, block := range incoming.Children {
+		if isSiteBlock(block) {
+			matches := findOverlappingSiteBlocks(base, block)
+			if len(matches) > 0 {
+				overlap := sharedKeys(matches[0], block)
+				mergeSiteBlocks(matches[0], block)
+				for _, extra := range matches[1:] {
+					mergeSiteBlocks(matches[0], extra)
+					base.Remove(extra)
+				}
+				if logger != nil {
+					logger.Warn(
+						"Merged overlapping site blocks",
+						zap.Strings("overlap", overlap),
+						zap.Strings("base", matches[0].Keys),
+						zap.Strings("incoming", block.Keys),
+					)
+				}
+				continue
+			}
+		}
+
+		one := caddyfile.CreateContainer()
+		one.AddBlock(block)
+		base.Merge(one)
+	}
+}
+
+func isSiteBlock(block *caddyfile.Block) bool {
+	if block == nil {
+		return false
+	}
+	return !block.IsGlobalBlock() && !block.IsSnippet() && !block.IsMatcher()
+}
+
+func findOverlappingSiteBlocks(container *caddyfile.Container, incoming *caddyfile.Block) []*caddyfile.Block {
+	if container == nil || incoming == nil {
+		return nil
+	}
+	var matches []*caddyfile.Block
+	for _, existing := range container.Children {
+		if !isSiteBlock(existing) {
+			continue
+		}
+		if len(sharedKeys(existing, incoming)) > 0 {
+			matches = append(matches, existing)
+		}
+	}
+	return matches
+}
+
+func sharedKeys(a, b *caddyfile.Block) []string {
+	if a == nil || b == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, key := range a.Keys {
+		seen[key] = struct{}{}
+	}
+	var overlap []string
+	for _, key := range b.Keys {
+		if _, ok := seen[key]; ok {
+			overlap = append(overlap, key)
+		}
+	}
+	return overlap
+}
+
+func mergeSiteBlocks(target, incoming *caddyfile.Block) {
+	if target == nil || incoming == nil {
+		return
+	}
+	existing := map[string]struct{}{}
+	for _, key := range target.Keys {
+		existing[key] = struct{}{}
+	}
+	for _, key := range incoming.Keys {
+		if _, ok := existing[key]; ok {
+			continue
+		}
+		target.AddKeys(key)
+		existing[key] = struct{}{}
+	}
+	target.Container.Merge(incoming.Container)
 }
 
 func (g *CaddyfileGenerator) checkSwarmAvailability(logger *zap.Logger, isFirstCheck bool) {

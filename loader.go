@@ -55,11 +55,6 @@ func CreateDockerLoader(options *config.Options) *DockerLoader {
 	}
 }
 
-func logger() *zap.Logger {
-	return caddy.Log().
-		Named("docker-proxy")
-}
-
 // Start docker loader
 func (dockerLoader *DockerLoader) Start() error {
 	if dockerLoader.initialized {
@@ -283,7 +278,13 @@ func (dockerLoader *DockerLoader) update() bool {
 			return false
 		}
 
-		log.Info("New Config JSON", zap.ByteString("json", configJSON))
+		logJSON := configJSON
+		if dockerLoader.options.PrettyLogJSON {
+			if indented, err := indentJSON(configJSON); err == nil {
+				logJSON = indented
+			}
+		}
+		log.Info("New Config JSON", zap.ByteString("json", logJSON))
 
 		dockerLoader.lastJSONConfig = configJSON
 		dockerLoader.lastVersion++
@@ -370,4 +371,12 @@ func addAdminListen(configJSON []byte, listen string) ([]byte, error) {
 		Listen: listen,
 	}
 	return json.Marshal(config)
+}
+
+func indentJSON(raw []byte) ([]byte, error) {
+	var buffer bytes.Buffer
+	if err := json.Indent(&buffer, raw, "", "  "); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }

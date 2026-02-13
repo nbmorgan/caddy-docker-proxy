@@ -3,6 +3,7 @@ package namepublish
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -56,7 +57,42 @@ func (p *TechnitiumPublisher) Publish(ctx context.Context, names []string, caddy
 	if p == nil {
 		return nil
 	}
+	retryDelays := []time.Duration{
+		12 * time.Second,
+		24 * time.Second,
+		48 * time.Second,
+		96 * time.Second,
+	}
 
+	var lastErr error
+	for attempt := 0; attempt <= len(retryDelays); attempt++ {
+		if err := p.publishOnce(ctx, names, caddyHost); err != nil {
+			lastErr = err
+			if !isRetryableError(err) || attempt == len(retryDelays) {
+				break
+			}
+			delay := retryDelays[attempt]
+			p.logger.Warn(
+				"Publish failed; retrying",
+				zap.Int("attempt", attempt+1),
+				zap.Duration("delay", delay),
+				zap.Error(err),
+			)
+			if !sleepWithContext(ctx, delay) {
+				break
+			}
+			continue
+		}
+		return nil
+	}
+
+	if lastErr == nil {
+		return nil
+	}
+	return lastErr
+}
+
+func (p *TechnitiumPublisher) publishOnce(ctx context.Context, names []string, caddyHost string) error {
 	recordType, rdataKey, rdataValue, err := p.recordParams(caddyHost)
 	if err != nil {
 		return err
@@ -65,12 +101,17 @@ func (p *TechnitiumPublisher) Publish(ctx context.Context, names []string, caddy
 		return nil
 	}
 
+	filteredNames := filterNamesForZone(names, p.zone)
+	if len(filteredNames) == 0 {
+		return nil
+	}
+
 	records, err := p.getZoneRecords(ctx)
 	if err != nil {
 		return err
 	}
 
-	desired := toNameSet(names)
+	desired := toNameSet(filteredNames)
 	managedByName := map[string][]technitiumRecord{}
 	existingByNameType := map[string][]technitiumRecord{}
 
@@ -96,7 +137,7 @@ func (p *TechnitiumPublisher) Publish(ctx context.Context, names []string, caddy
 		}
 	}
 
-	for _, name := range names {
+	for _, name := range filteredNames {
 		if strings.TrimSpace(name) == "" {
 			continue
 		}
@@ -337,4 +378,62 @@ func isSupportedType(recordType string) bool {
 	default:
 		return false
 	}
+}
+
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "does not belong to the zone") {
+		return false
+	}
+	if strings.Contains(message, "unmanaged record exists") {
+		return false
+	}
+	if strings.Contains(message, "connection refused") ||
+		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "timeout") ||
+		strings.Contains(message, "temporary failure") ||
+		strings.Contains(message, "no such host") {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	return true
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func filterNamesForZone(names []string, zone string) []string {
+	zone = strings.TrimSpace(strings.TrimSuffix(strings.ToLower(zone), "."))
+	if zone == "" {
+		return nil
+	}
+
+	var filtered []string
+	for _, name := range names {
+		candidate := strings.TrimSpace(strings.TrimSuffix(strings.ToLower(name), "."))
+		if candidate == "" {
+			continue
+		}
+		if candidate == zone || strings.HasSuffix(candidate, "."+zone) {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
 }
